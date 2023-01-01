@@ -1,0 +1,8 @@
+
+#don't upload large datasets. 
+*.xyz
+
+# don't upload partial scripts
+/dev_scripts
+/minimal_error_examples
+/other_classes
