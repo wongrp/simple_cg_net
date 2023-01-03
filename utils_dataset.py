@@ -33,7 +33,7 @@ class ProcessedDataset(Dataset):
 
         self.data = data
 
-        # number of points 
+        # number of points
         if num_pts < 0:
             self.num_pts = len(data['charges'])
         else:

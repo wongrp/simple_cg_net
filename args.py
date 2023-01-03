@@ -29,6 +29,63 @@ def init_args():
     # Computation options
     parser.add_argument('--num-workers', type=int, default=1,
                         help='Set number of workers in dataloader. (Default: 1)')
+    parser.add_argument('--cuda', dest='cuda', action='store_true',
+                        help='Use CUDA')
+    parser.add_argument('--no-cuda', '--cpu', dest='cuda', action='store_false',
+                        help='Use CPU (default)')
+    parser.set_defaults(cuda=False)
+    parser.add_argument('--float', dest='dtype', action='store_const', const='float',
+                        help='Use floats.')
+    parser.add_argument('--double', dest='dtype', action='store_const', const='double',
+                        help='Use doubles.')
+    parser.set_defaults(dtype='float')
+
+
+    # Model options
+    parser.add_argument('--num-cg-layers', type=int, default=4, metavar='N',
+                        help='Number of CG levels (default: 4)')
+
+    parser.add_argument('--max-l', nargs='*', type=int, default=[3], metavar='N',
+                        help='Cutoff in CG operations (default: [3])')
+    parser.add_argument('--max-sh', nargs='*', type=int, default=[3], metavar='N',
+                        help='Number of spherical harmonic powers to use (default: [3])')
+    parser.add_argument('--num-channels', nargs='*', type=int, default=[10], metavar='N',
+                        help='Number of channels to allow after mixing (default: [10])')
+    parser.add_argument('--level-gain', nargs='*', type=float, default=[10.], metavar='N',
+                        help='Gain at each level (default: [10.])')
+
+    parser.add_argument('--charge-power', type=int, default=2, metavar='N',
+                        help='Maximum power to take in one-hot (default: 2)')
+
+    parser.add_argument('--hard-cutoff', dest='hard_cut_rad',
+                        type=float, default=1.73, nargs='*', metavar='N',
+                        help='Radius of HARD cutoff in Angstroms (default: 1.73)')
+    parser.add_argument('--soft-cutoff', dest='soft_cut_rad', type=float,
+                        default=1.73, nargs='*', metavar='N',
+                        help='Radius of SOFT cutoff in Angstroms (default: 1.73)')
+    parser.add_argument('--soft-width', dest='soft_cut_width',
+                        type=float, default=0.2, nargs='*', metavar='N',
+                        help='Width of SOFT cutoff in Angstroms (default: 0.2)')
+    parser.add_argument('--cutoff-type', '--cutoff', type=str, default=['learn'], nargs='*', metavar='str',
+                        help='Types of cutoffs to include')
+
+    parser.add_argument('--basis-set', '--krange', type=int, default=[3, 3], nargs=2, metavar='N',
+                        help='Radial function basis set (m, n) size (default: [3, 3])')
+
+
+    # More Model options
+    parser.add_argument('--weight-init', type=str, default='rand', metavar='str',
+                        help='Weight initialization function to use (default: rand)')
+
+    parser.add_argument('--input', type=str, default='linear',
+                        help='Function to apply to process l0 input (linear | MPNN) default: linear')
+    parser.add_argument('--num-mpnn-layers', type=int, default=1,
+                        help='Number levels to use in input featurization MPNN. (default: 1)')
+    parser.add_argument('--top', '--output', type=str, default='linear',
+                        help='Top function to use (linear | PMLP) default: linear')
+
+    parser.add_argument('--gaussian-mask', action='store_true',
+                        help='Use gaussian mask instead of sigmoid mask.')
 
 
     args = parser.parse_args()

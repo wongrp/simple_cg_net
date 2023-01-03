@@ -1,9 +1,10 @@
 import torch
-
+import numpy as np
 
 import torch
 import torch.nn as nn
 
+from gelib import *
 from network_output_mlp import *
 from network_edge_update import *
 from network_radial_filters import *
@@ -116,7 +117,7 @@ class InputMPNN(nn.Module):
     dtype : :class:`torch.dtype`, optional
         Data type to instantite the module to.
     """
-    def __init__(self, channels_in, channels_out, num_layers=1,
+    def __init__(self, max_l, channels_in, channels_out, num_layers=1,
                  soft_cut_rad=None, soft_cut_width=None, hard_cut_rad=None, cutoff_type=['learn'],
                  channels_mlp=-1, num_hidden=1, layer_width=256,
                  activation='leakyrelu', basis_set=(3, 3),
@@ -126,6 +127,7 @@ class InputMPNN(nn.Module):
         self.soft_cut_rad = soft_cut_rad
         self.soft_cut_width = soft_cut_width
         self.hard_cut_rad = hard_cut_rad
+        self.max_l = max_l
 
         if channels_mlp < 0:
             channels_mlp = max(channels_in, channels_out)
@@ -215,15 +217,23 @@ class InputMPNN(nn.Module):
             features = mlp(features_mp, mask=atom_mask)
 
         # The output are the MLP features reshaped into a set of complex numbers.
-        features = features.view(s[0:2] + (self.channels_out, 1, 2))
+        features = features.view(s[0:2] + (1, 2,self.channels_out))
 
         # construct complex tensor for GELib
-        features = torch.complex(features[...,0],features[...,1])
-
+        features = torch.complex(features[...,0,:],features[...,1,:])
+        print('features before gelib' ,features.size())
         # as SO3VecArr
-        features_size = channels_out*np.ones(0+1).astype(int)
-        out = SO3vecArr.zeros(batch_size,[features.size(1)],features_size)
+        features_size = self.channels_out*np.ones((self.max_l[0]+1)).astype(int)
+        out = SO3vecArr.zeros(features.size(0),[features.size(1)],features_size)
+        print(out.tau())
+        print(out.parts[0].size())
         out.parts[0] = features
+        # make sure channels match
+        print('self.channels_out',self.channels_out)
+        print(features_size)
+        print(out.tau())
+
+
 
         return out
 

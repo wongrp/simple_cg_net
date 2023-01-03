@@ -1,7 +1,7 @@
 import torch
 
 
-def rel_pos(pos1,pos2):
+def get_rel_pos(pos1,pos2):
     """
     Parameters:
     pos1, pos2: torch.Tensor with dimensions (num_atoms,3)
@@ -12,4 +12,4 @@ def rel_pos(pos1,pos2):
 
 
 def get_norm(pos1,pos2):
-    return (rel_pos(pos1,pos2).norm(dim = -1, keepdim = True)).squeeze(-1)
+    return (get_rel_pos(pos1,pos2).norm(dim = -1, keepdim = True)).squeeze(-1)
