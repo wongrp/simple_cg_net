@@ -217,21 +217,20 @@ class InputMPNN(nn.Module):
             features = mlp(features_mp, mask=atom_mask)
 
         # The output are the MLP features reshaped into a set of complex numbers.
-        features = features.view(s[0:2] + (1, 2,self.channels_out))
+        features = features.view(s[0:2] + (1, 1, 2,self.channels_out))
 
         # construct complex tensor for GELib
         features = torch.complex(features[...,0,:],features[...,1,:])
         print('features before gelib' ,features.size())
         # as SO3VecArr
         features_size = self.channels_out*np.ones((self.max_l[0]+1)).astype(int)
-        out = SO3vecArr.zeros(features.size(0),[features.size(1)],features_size)
-        print(out.tau())
+        out = SO3vecArr.zeros(features.size(0),[features.size(1),1],features_size)
+        print('out adims', out.get_adims())
+        print(features.size())
         print(out.parts[0].size())
         out.parts[0] = features
         # make sure channels match
-        print('self.channels_out',self.channels_out)
-        print(features_size)
-        print(out.tau())
+        print('out adims after setting values', out.get_adims())
 
 
 

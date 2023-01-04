@@ -20,7 +20,7 @@ class CGLayers(nn.Module):
         print("type:", type)
         print("type_after_nl:",type_after_nl)
         # initialize weights
-        weights_nl = SO3weightsArr.randn([num_atoms],type_after_nl, type)
+        weights_nl = SO3weightsArr.randn([num_atoms,1],type_after_nl, type)
         weights_rel = SO3weightsArr.randn([num_atoms,num_atoms],type_after_rel,type)
 
         # make layer module list
@@ -123,6 +123,7 @@ class CGLayer(nn.Module):
 
     def forward(self, vertices, connectivity, sph):
         print('vertices tau', vertices.tau())
+        print('vertices a', vertices.get_adims())
         vertices_mp = self.message_pass(vertices,connectivity)
 
         # quick fix, delete when gather is fixed on the cnine side.#
@@ -141,6 +142,7 @@ class CGLayer(nn.Module):
         new_adims = sph.get_adims()
         old_adims = vertices_mixed_nl.get_adims()
         repeat_dims = (np.array(new_adims)/np.array(old_adims)).astype(int)
+        print(repeat_dims)
         current_tau = np.array(vertices_mixed_nl.tau()).astype(int)
 
         vertices_mixed_nl_repeat = SO3vecArr.zeros(sph.getb(),new_adims, current_tau)
