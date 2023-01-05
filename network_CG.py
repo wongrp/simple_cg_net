@@ -32,6 +32,7 @@ class CGLayers(nn.Module):
 
         # initialize weights
         cg_layers.apply(self._init_weights)
+
     def forward(self, vertices, rel_pos, norms):
         vertices_all = [] # each entry is the set of vertices from one layer. len(vertices) = num_CG_layers
         scalars_all = torch.empty(0)
@@ -74,7 +75,8 @@ class GetScalars(nn.Module):
         max_l = self.max_l
 
         # Take l=0 component
-        scalars_part0 = torch.reshape(vertices.parts[0],(num_channels,num_atoms))
+        scalars_part0 = vertices.parts[0]
+
         # Take the SO(3) invariant norm
         scalars_norm = self.so3norm(vertices)
         # concatenate
@@ -100,16 +102,20 @@ class GetSO3Norm(nn.Module):
             vertices_conj.parts[l] = torch.resolve_conj(vertices.parts[l]) # take the complex conjugate
             for channel1 in range(num_channels): # iterate all combinations of channels.
                 for channel2 in range(num_channels):
-                    # dim(SO3vecArr.parts = (parts = max_l, batches = 1, num_atoms, m, channels))
-                    vertices1 = (torch.reshape(vertices.parts[l],(num_atoms,2*l+1,num_channels)))[:,:,channel1] # all elements along channel at part l.
-                    vertices2 = (torch.reshape(vertices_conj.parts[l],(num_atoms,2*l+1,num_channels)))[:,:,channel2]
-                    assert vertices1.size() == vertices2.size()
-                    assert vertices1.size() == torch.Size([num_atoms,2*l+1])
-
+                    # dim(SO3vecArr.parts = (parts = max_l, batches, num_atoms, m, channels))
+                    # vertices1 = (torch.reshape(vertices.parts[l],([num_atoms,1],2*l+1,num_channels)))[:,:,channel1] # all elements along channel at part l.
+                    # vertices2 = (torch.reshape(vertices_conj.parts[l],([num_atoms,1],2*l+1,num_channels)))[:,:,channel2]
+                    # assert vertices1.size() == vertices2.size()
+                    # assert vertices1.size() == torch.Size([num_atoms,2*l+1])
+                    vertices1 = vertices.parts[l][:,:,:,:,channel1]
+                    vertices2 = vertices_conj.parts[l][:,:,:,:,channel2]
                     # take norm F_l^tau1(F_l^tau2)*
-                    scalar_norm = torch.sum(torch.mul(vertices1, vertices2),dim = (1)) # sum along the m axis (with 2l+1 elements)
-                    scalars_norm[channels_count,:] = scalar_norm
+                    print(vertices1.size())
+                    scalar_norm = torch.sum(torch.mul(vertices1, vertices2),dim = (-2), keepdim = False) # sum along the m axis (with 2l+1 elements)
+                    print(scalar_norm.size())
+                    # scalars_norm[channels_count,:] = scalar_norm.view()
                     channels_count += 1
+                    pass
         return scalars_norm
 
 
@@ -141,8 +147,9 @@ class CGLayer(nn.Module):
         # make a repeated copy of the mixed nonlinear vertices.
         new_adims = sph.get_adims()
         old_adims = vertices_mixed_nl.get_adims()
+        print(old_adims)
         repeat_dims = (np.array(new_adims)/np.array(old_adims)).astype(int)
-        print(repeat_dims)
+
         current_tau = np.array(vertices_mixed_nl.tau()).astype(int)
 
         vertices_mixed_nl_repeat = SO3vecArr.zeros(sph.getb(),new_adims, current_tau)
@@ -155,19 +162,24 @@ class CGLayer(nn.Module):
         vertices_cg_rel = CGproduct(vertices_mixed_nl_repeat, sph, maxl = self.max_l)
 
         # make sure the weight matrix matches
-        assert self.weights_rel.get_adims() == vertices_cg_rel.get_adims()
-        assert self.weights_rel.get_tau1() == vertices_cg_rel.tau()
+        assert self.weights_rel.get_adims() == vertices_cg_rel.get_adims(), \
+        "'rel' weights has adims {} while activations have adims {}!".format(self.weights_rel.get_adims(),vertices_cg_rel.get_adims())
+        assert self.weights_rel.get_tau1() == vertices_cg_rel.tau(), \
+        "'rel' weights has tau {} while activations have tau {}!".format(self.weights_rel.tau(),vertices_cg_rel.tau())
 
         # mix and sum across atoms. replace sph.getb()!!
         vertices_mixed_rel = vertices_cg_rel*self.weights_rel
         vertices_sum = SO3vecArr.zeros(sph.getb(),old_adims,vertices.tau())
-        for l in range(self.max_l+1):
-            vertices_sum.parts[l] = torch.sum(vertices_mixed_rel.parts[l], 1)
 
-        # normalize in equivariant manner
+        for l in range(self.max_l+1):
+            # array dims won't match without keepdim
+            vertices_sum.parts[l] = torch.sum(vertices_mixed_rel.parts[l], 2, keepdim = True)
+
+        # equivariant norm
         vertices_normed = self.normalize(vertices_sum)
 
-        assert vertices_sum.get_adims() == vertices.get_adims()
+        assert vertices_sum.get_adims() == vertices.get_adims(), \
+        "summed activations has adims {} while input activations have adims {}!".format(vertices_sum.get_adims(), vertices.get_adims())
 
         return vertices_sum
 
