@@ -8,34 +8,30 @@ import numpy as np
 class CGLayers(nn.Module):
     def __init__(self, num_CG_layers, num_atoms, num_channels, max_l, hard_cut_rad):
         super().__init__()
+        # parameters
         # for now, assume constant max_l, constant num_channels
         num_channels = num_channels[0]
         max_l = max_l[0]
+        self.hard_cut_rad = hard_cut_rad
+        self.num_atoms = num_atoms
 
         # track types after CG products, concatenation and mixing
-        type = num_channels*np.ones((max_l+1)).astype(int)
-        type_after_nl = np.array(CGproductType(type,type, maxl = max_l)).astype(int)
-        self.type_sph = type # type resets after each mix # this is tunable to some degree.
-        type_after_rel = np.array(CGproductType(type,self.type_sph, maxl = max_l)).astype(int)
-        print("type:", type)
-        print("type_after_nl:",type_after_nl)
-        # initialize weights
-        weights_nl = SO3weightsArr.randn([num_atoms,1],type_after_nl, type)
-        weights_rel = SO3weightsArr.randn([num_atoms,num_atoms],type_after_rel,type)
+        self.type = num_channels*np.ones((max_l+1)).astype(int)
+        self.type_after_nl = np.array(CGproductType(self.type,self.type, maxl = max_l)).astype(int)
+        self.type_sph = self.type # type resets after each mix # this is tunable to some degree.
+        self.type_after_rel = np.array(CGproductType(self.type,self.type_sph, maxl = max_l)).astype(int)
 
         # make layer module list
         cg_layers = nn.ModuleList() # list-iterable , but registered as modules.
         for layer in range(num_CG_layers):
-            cg_layers.append(CGLayer(weights_nl, weights_rel, max_l))
+            cg_layers.append(CGLayer(max_l))
         self.cg_layers = cg_layers
 
         # scalars module
         self.get_scalars = GetScalars(num_atoms,num_channels, max_l)
 
-        # parameters
-        self.hard_cut_rad = hard_cut_rad
-        self.num_atoms = num_atoms
-
+        # initialize weights
+        cg_layers.apply(self._init_weights)
     def forward(self, vertices, rel_pos, norms):
         vertices_all = [] # each entry is the set of vertices from one layer. len(vertices) = num_CG_layers
         scalars_all = torch.empty(0)
@@ -48,13 +44,21 @@ class CGLayers(nn.Module):
         # CG layers
         for idx, cg_layer in enumerate(self.cg_layers):
             vertices = cg_layer(vertices, connectivity, sph)
-            print(':)')
             vertices_all.append(vertices)
             scalars = self.get_scalars(vertices)
             scalars_all = torch.cat((scalars_all,scalars))
 
             # scalars_all should have num_CG_layers*((num_channels)+(max_l+1)*num_channels^2) elements
         return scalars_all
+
+    def _init_weights(self, module):
+        if isinstance(module, CGLayer):
+            # nonlinear weights mixes activations after a CG nonlinearity.
+            module.weights_nl = SO3weightsArr.randn([self.num_atoms,1],
+                                self.type_after_nl, self.type)
+            # rel weights mixes activations after spherical harmonics CG product.
+            module.weights_rel = SO3weightsArr.randn([self.num_atoms,
+                                self.num_atoms],self.type_after_rel,self.type)
 
 class GetScalars(nn.Module):
     def __init__(self, num_atoms,num_channels, max_l):
@@ -110,14 +114,10 @@ class GetSO3Norm(nn.Module):
 
 
 class CGLayer(nn.Module):
-    def __init__(self,weights_nl, weights_rel, max_l):
+    def __init__(self,max_l):
         super().__init__()
         self.normalize = NormalizeVecArr(max_l)
-        self.weights_nl = weights_nl
-        self.weights_rel = weights_rel
         self.max_l = max_l
-
-
 
         # self.copy_array = CopyArray()
 
@@ -158,9 +158,9 @@ class CGLayer(nn.Module):
         assert self.weights_rel.get_adims() == vertices_cg_rel.get_adims()
         assert self.weights_rel.get_tau1() == vertices_cg_rel.tau()
 
-        # mix and sum across atoms.
+        # mix and sum across atoms. replace sph.getb()!!
         vertices_mixed_rel = vertices_cg_rel*self.weights_rel
-        vertices_sum = SO3vecArr.zeros(1,old_adims,vertices.tau())
+        vertices_sum = SO3vecArr.zeros(sph.getb(),old_adims,vertices.tau())
         for l in range(self.max_l+1):
             vertices_sum.parts[l] = torch.sum(vertices_mixed_rel.parts[l], 1)
 
