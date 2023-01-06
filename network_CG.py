@@ -47,6 +47,7 @@ class CGLayers(nn.Module):
             vertices = cg_layer(vertices, connectivity, sph)
             vertices_all.append(vertices)
             scalars = self.get_scalars(vertices)
+            # concatenate along the layer dimension
             scalars_all = torch.cat((scalars_all,scalars))
 
             # scalars_all should have num_CG_layers*((num_channels)+(max_l+1)*num_channels^2) elements
@@ -74,16 +75,18 @@ class GetScalars(nn.Module):
         num_channels = self.num_channels
         max_l = self.max_l
 
-        # Take l=0 component
-        scalars_part0 = vertices.parts[0]
-
+        # Take l=0 component. Reshape to dim = 3 to fit SO(3) norm.
+        scalars_part0 = torch.reshape(vertices.parts[0], (vertices.getb(),self.num_atoms,self.num_channels))
         # Take the SO(3) invariant norm
         scalars_norm = self.so3norm(vertices)
-        # concatenate
-        scalars = torch.cat((scalars_part0,scalars_norm))
+        # concatenate along the last (channel) dimension
+        scalars = torch.cat((scalars_part0,scalars_norm),-1)
         return scalars
 
 class GetSO3Norm(nn.Module):
+    """
+    Calculate the SO(3) and permutation invariant norm.
+    """
     def __init__(self, num_atoms, num_channels, max_l):
         super().__init__()
         self.num_atoms = num_atoms
@@ -95,9 +98,10 @@ class GetSO3Norm(nn.Module):
         num_channels = self.num_channels
         max_l = self.max_l
 
-        scalars_norm = torch.zeros((max_l+1)*num_channels**2,num_atoms)
+        scalars_norm = torch.zeros(vertices.getb(), num_atoms,(max_l+1)*num_channels**2)
         vertices_conj = SO3vecArr.zeros(1,[num_atoms],num_channels*np.ones((max_l+1)).astype(int)) # complex conjugate
         channels_count = 0
+        # FIX: loop through every vector component and take the norm for permutation invariance.
         for l in range(len(vertices.parts)):
             vertices_conj.parts[l] = torch.resolve_conj(vertices.parts[l]) # take the complex conjugate
             for channel1 in range(num_channels): # iterate all combinations of channels.
@@ -109,13 +113,12 @@ class GetSO3Norm(nn.Module):
                     # assert vertices1.size() == torch.Size([num_atoms,2*l+1])
                     vertices1 = vertices.parts[l][:,:,:,:,channel1]
                     vertices2 = vertices_conj.parts[l][:,:,:,:,channel2]
-                    # take norm F_l^tau1(F_l^tau2)*
-                    print(vertices1.size())
-                    scalar_norm = torch.sum(torch.mul(vertices1, vertices2),dim = (-2), keepdim = False) # sum along the m axis (with 2l+1 elements)
-                    print(scalar_norm.size())
-                    # scalars_norm[channels_count,:] = scalar_norm.view()
+                    # take norm F_l^tau1(F_l^tau2) -- sum along each part 2l+1
+                    scalar_norm = torch.sum(torch.mul(vertices1, vertices2),dim = (-1), keepdim = False) # sum along the m axis (with 2l+1 elements)
+                    scalars_norm[...,channels_count] = scalar_norm.squeeze(-1)
+
                     channels_count += 1
-                    pass
+
         return scalars_norm
 
 
@@ -128,26 +131,22 @@ class CGLayer(nn.Module):
         # self.copy_array = CopyArray()
 
     def forward(self, vertices, connectivity, sph):
-        print('vertices tau', vertices.tau())
-        print('vertices a', vertices.get_adims())
         vertices_mp = self.message_pass(vertices,connectivity)
 
         # quick fix, delete when gather is fixed on the cnine side.#
         # for l in range(len(vertices_mp.tau())):
         #     vertices_mp.parts[l] = torch.unsqueeze(vertices_mp.parts[l],0)
         # assert vertices_mp.getb() == 1
-        print('vertices_mp a', vertices_mp.get_adims())
-        print('vertices_mp b', vertices_mp.getb())
-        print('vertices_mp tau', vertices_mp.tau())
+    
         # quick fix, delete when gather is fixed on the cnine side.#
         vertices_cg_nl = CGproduct(vertices_mp, vertices_mp, maxl = self.max_l)
 
         vertices_mixed_nl = vertices_cg_nl*self.weights_nl
 
+        # spherical harmonics are NxN, activations are Nx1. Repeat activations by N to take CG product.
         # make a repeated copy of the mixed nonlinear vertices.
         new_adims = sph.get_adims()
         old_adims = vertices_mixed_nl.get_adims()
-        print(old_adims)
         repeat_dims = (np.array(new_adims)/np.array(old_adims)).astype(int)
 
         current_tau = np.array(vertices_mixed_nl.tau()).astype(int)
@@ -155,10 +154,7 @@ class CGLayer(nn.Module):
         vertices_mixed_nl_repeat = SO3vecArr.zeros(sph.getb(),new_adims, current_tau)
         for l in range(self.max_l+1):
             vertices_mixed_nl_repeat.parts[l] = vertices_mixed_nl.parts[l].repeat(1, repeat_dims[0],repeat_dims[1],1,1) # batch, adim 1, adim 2, 2l+1, num_channels
-        print(vertices_mixed_nl_repeat.getb())
-        print(vertices_mixed_nl_repeat.get_adims())
-        print(sph.get_adims())
-        print(sph.getb())
+
         vertices_cg_rel = CGproduct(vertices_mixed_nl_repeat, sph, maxl = self.max_l)
 
         # make sure the weight matrix matches
@@ -178,6 +174,7 @@ class CGLayer(nn.Module):
         # equivariant norm
         vertices_normed = self.normalize(vertices_sum)
 
+        # check that array dimensions match original.
         assert vertices_sum.get_adims() == vertices.get_adims(), \
         "summed activations has adims {} while input activations have adims {}!".format(vertices_sum.get_adims(), vertices.get_adims())
 

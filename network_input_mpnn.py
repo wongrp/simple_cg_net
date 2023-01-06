@@ -221,18 +221,12 @@ class InputMPNN(nn.Module):
 
         # construct complex tensor for GELib
         features = torch.complex(features[...,0,:],features[...,1,:])
-        print('features before gelib' ,features.size())
-        # as SO3VecArr
+
+        # Convert to SO3VecArr object.
         features_size = self.channels_out*np.ones((self.max_l[0]+1)).astype(int)
         out = SO3vecArr.zeros(features.size(0),[features.size(1),1],features_size)
-        print('out adims', out.get_adims())
-        print(features.size())
-        print(out.parts[0].size())
         out.parts[0] = features
-        # make sure channels match
-        print('out adims after setting values', out.get_adims())
-
-
+        
 
         return out
 
