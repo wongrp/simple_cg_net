@@ -5,20 +5,23 @@ import logging
 from datetime import datetime
 from math import sqrt
 
+from gelib import *
 from args import *
-from utils_initialize_dataset import *
-from utils_relative_positions import *
-from utils_init import *
-
-from collate import collate_fn
-
 
 from network_radial_filters import *
 from network_edge_update import *
 from network_input_mpnn import *
 from network_model import *
 
-from gelib import *
+from utils_initialize_dataset import *
+from utils_relative_positions import *
+from utils_init import *
+
+from engine import Engine
+
+from collate import collate_fn
+
+
 
 # This makes printing tensors more readable.
 torch.set_printoptions(linewidth=1000, threshold=100000)
@@ -61,37 +64,30 @@ def main():
                  charge_scale, args.gaussian_mask,
                  args.top, args.input, args.num_mpnn_layers,
                  device=device, dtype=dtype)
+    # dataloaders['train'].dataset.data.keys()
+    # prediction = model(dataloaders['train'].dataset.data)
 
-    scalars_all = model(dataloaders['val'].dataset.data)
+    # Initialize the scheduler and optimizer
+    optimizer = init_optimizer(args, model)
+    scheduler, restart_epochs = init_scheduler(args, optimizer)
 
-    # model = CormorantQM9(args.maxl, args.max_sh, args.num_cg_levels, args.num_channels, num_species,
-    #                     args.cutoff_type, args.hard_cut_rad, args.soft_cut_rad, args.soft_cut_width,
-    #                     args.weight_init, args.level_gain, args.charge_power, args.basis_set,
-    #                     charge_scale, args.gaussian_mask,
-    #                     args.top, args.input, args.num_mpnn_levels,
-    #                     device=device, dtype=dtype)
-    #
-    # # Initialize the scheduler and optimizer
-    # optimizer = init_optimizer(args, model)
-    # scheduler, restart_epochs = init_scheduler(args, optimizer)
-    #
-    # # Define a loss function. Just use L2 loss for now.
-    # loss_fn = torch.nn.functional.mse_loss
-    #
-    # # Apply the covariance and permutation invariance tests.
+    # Define a loss function. Just use L2 loss for now.
+    loss_fn = torch.nn.functional.mse_loss
+
+    # Apply the covariance and permutation invariance tests.
     # cormorant_tests(model, dataloaders['train'], args, charge_scale=charge_scale)
-    #
-    # # Instantiate the training class
-    # trainer = Engine(args, dataloaders, model, loss_fn, optimizer, scheduler, restart_epochs, device, dtype)
-    #
-    # # Load from checkpoint file. If no checkpoint file exists, automatically does nothing.
-    # trainer.load_checkpoint()
-    #
-    # # Train model.
-    # trainer.train()
-    #
-    # # Test predictions on best model and also last checkpointed model.
-    # trainer.evaluate()
+
+    # Instantiate the training class
+    trainer = Engine(args, dataloaders, model, loss_fn, optimizer, scheduler, restart_epochs, device, dtype)
+
+    # Load from checkpoint file. If no checkpoint file exists, automatically does nothing.
+    trainer.load_checkpoint()
+
+    # Train model.
+    trainer.train()
+
+    # Test predictions on best model and also last checkpointed model.
+    trainer.evaluate()
 
 if __name__ == '__main__':
     main()

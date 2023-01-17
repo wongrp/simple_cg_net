@@ -99,8 +99,6 @@ class MaskLevel(nn.Module):
                 edge_mask = edge_mask * torch.sigmoid((cut_rad - norms.unsqueeze(-1))/cut_width)
 
         edge_mask = edge_mask.unsqueeze(-1)
-        print(edge_net.size())
-        print(edge_mask.size())
         edge_net = edge_net * edge_mask
 
 

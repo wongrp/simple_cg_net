@@ -29,11 +29,12 @@ class OutputMLP(nn.Module):
         Data type to instantite the module to.
     """
     def __init__(self, num_scalars, num_mixed=64, activation='leakyrelu', device=torch.device('cpu'), dtype=torch.float):
-        super(OutputPMLP, self).__init__()
+        super(OutputMLP, self).__init__()
 
         self.num_scalars = num_scalars # inputs
         self.num_mixed = num_mixed
 
+        #self.mlp1 = BasicMLP(num_scalars, num_mixed, num_hidden=1, activation=activation, device=device, dtype=dtype)
         self.mlp1 = BasicMLP(2*num_scalars, num_mixed, num_hidden=1, activation=activation, device=device, dtype=dtype)
         self.mlp2 = BasicMLP(num_mixed, 1, num_hidden=1, activation=activation, device=device, dtype=dtype)
 
@@ -55,19 +56,23 @@ class OutputMLP(nn.Module):
         predict : :class:`torch.Tensor`
             Tensor used for predictions.
         """
+        print("atom_scalars:", atom_scalars.size())
         # Reshape scalars appropriately;
         atom_scalars = atom_scalars.view(atom_scalars.shape[:2] + (2*self.num_scalars,))
-
+        #atom_scalars = atom_scalars.view(atom_scalars.shape[:2] + (self.num_scalars,))
+        print("atom_scalars reshaped:",atom_scalars.size())
         # First MLP applied to each atom
         x = self.mlp1(atom_scalars)
 
         # Reshape to sum over each atom in molecules, setting non-existent atoms to zero.
         atom_mask = atom_mask.unsqueeze(-1) # ....
+        print("atom_mask:", atom_mask.size())
+        print("first mlp output:", x.size())
         x = torch.where(atom_mask, x, self.zero).sum(1) # sum across atoms.
 
         # Prediction on permutation invariant representation of molecules
         predict = self.mlp2(x)
-
+        print("second mlp output: ", predict.size())
         predict = predict.squeeze(-1)
 
         return predict

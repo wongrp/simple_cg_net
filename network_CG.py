@@ -6,14 +6,10 @@ import numpy as np
 
 
 class CGLayers(nn.Module):
-    def __init__(self, num_CG_layers, num_atoms, num_channels, max_l, hard_cut_rad):
+    def __init__(self, num_CG_layers, num_channels, max_l, hard_cut_rad):
         super().__init__()
         # parameters
-        # for now, assume constant max_l, constant num_channels
-        num_channels = num_channels[0]
-        max_l = max_l[0]
         self.hard_cut_rad = hard_cut_rad
-        self.num_atoms = num_atoms
 
         # track types after CG products, concatenation and mixing
         self.type = num_channels*np.ones((max_l+1)).astype(int)
@@ -28,27 +24,32 @@ class CGLayers(nn.Module):
         self.cg_layers = cg_layers
 
         # scalars module
-        self.get_scalars = GetScalars(num_atoms,num_channels, max_l)
+        self.get_scalars = GetScalars(num_channels, max_l)
 
         # initialize weights
         cg_layers.apply(self._init_weights)
 
     def forward(self, vertices, rel_pos, norms):
+        # maximum atom number
+        self.num_atoms = get_num_atom(vertices)
+        self.get_scalars.num_atoms = self.num_atoms
+
         vertices_all = [] # each entry is the set of vertices from one layer. len(vertices) = num_CG_layers
         scalars_all = torch.empty(0)
-
         # relative positions -> spherical harmonics and norms -> connectivity
         make_sph = SphArr(vertices.getb(),[self.num_atoms,self.num_atoms], self.type_sph)
         sph = make_sph(rel_pos)
         connectivity = (norms < self.hard_cut_rad).float()
 
         # CG layers
+        print('CG Layers')
+
         for idx, cg_layer in enumerate(self.cg_layers):
             vertices = cg_layer(vertices, connectivity, sph)
             vertices_all.append(vertices)
             scalars = self.get_scalars(vertices)
             # concatenate along the layer dimension
-            scalars_all = torch.cat((scalars_all,scalars))
+            scalars_all = torch.cat((scalars_all,scalars),-1)
 
             # scalars_all should have num_CG_layers*((num_channels)+(max_l+1)*num_channels^2) elements
         return scalars_all
@@ -56,24 +57,21 @@ class CGLayers(nn.Module):
     def _init_weights(self, module):
         if isinstance(module, CGLayer):
             # nonlinear weights mixes activations after a CG nonlinearity.
-            module.weights_nl = SO3weightsArr.randn([self.num_atoms,1],
-                                self.type_after_nl, self.type)
+            module.weights_nl = SO3weights.randn(self.type_after_nl, self.type)
             # rel weights mixes activations after spherical harmonics CG product.
-            module.weights_rel = SO3weightsArr.randn([self.num_atoms,
-                                self.num_atoms],self.type_after_rel,self.type)
+            module.weights_rel = SO3weights.randn(self.type_after_rel,self.type)
 
 class GetScalars(nn.Module):
-    def __init__(self, num_atoms,num_channels, max_l):
+    def __init__(self,num_channels, max_l):
         super().__init__()
-        self.so3norm = GetSO3Norm(num_atoms, num_channels,max_l)
-        self.num_atoms = num_atoms
+        self.so3norm = GetSO3Norm(num_channels,max_l)
         self.num_channels = num_channels
         self.max_l = max_l
 
     def forward(self, vertices):
-        num_atoms = self.num_atoms
         num_channels = self.num_channels
         max_l = self.max_l
+        self.so3norm.num_atoms = self.num_atoms
 
         # Take l=0 component. Reshape to dim = 3 to fit SO(3) norm.
         scalars_part0 = torch.reshape(vertices.parts[0], (vertices.getb(),self.num_atoms,self.num_channels))
@@ -81,25 +79,27 @@ class GetScalars(nn.Module):
         scalars_norm = self.so3norm(vertices)
         # concatenate along the last (channel) dimension
         scalars = torch.cat((scalars_part0,scalars_norm),-1)
+
+        print(scalars_part0.size())
+        print(scalars_norm.size())
+        print(scalars.size())
         return scalars
 
 class GetSO3Norm(nn.Module):
     """
     Calculate the SO(3) and permutation invariant norm.
     """
-    def __init__(self, num_atoms, num_channels, max_l):
+    def __init__(self, num_channels, max_l):
         super().__init__()
-        self.num_atoms = num_atoms
         self.num_channels = num_channels
         self.max_l = max_l
 
     def forward(self, vertices):
-        num_atoms = self.num_atoms
         num_channels = self.num_channels
         max_l = self.max_l
 
-        scalars_norm = torch.zeros(vertices.getb(), num_atoms,(max_l+1)*num_channels**2)
-        vertices_conj = SO3vecArr.zeros(1,[num_atoms],num_channels*np.ones((max_l+1)).astype(int)) # complex conjugate
+        scalars_norm = torch.zeros(vertices.getb(), self.num_atoms,(max_l+1)*num_channels**2)
+        vertices_conj = SO3vecArr.zeros(1,[self.num_atoms],num_channels*np.ones((max_l+1)).astype(int)) # complex conjugate
         channels_count = 0
         # FIX: loop through every vector component and take the norm for permutation invariance.
         for l in range(len(vertices.parts)):
@@ -137,7 +137,7 @@ class CGLayer(nn.Module):
         # for l in range(len(vertices_mp.tau())):
         #     vertices_mp.parts[l] = torch.unsqueeze(vertices_mp.parts[l],0)
         # assert vertices_mp.getb() == 1
-    
+
         # quick fix, delete when gather is fixed on the cnine side.#
         vertices_cg_nl = CGproduct(vertices_mp, vertices_mp, maxl = self.max_l)
 
@@ -158,10 +158,10 @@ class CGLayer(nn.Module):
         vertices_cg_rel = CGproduct(vertices_mixed_nl_repeat, sph, maxl = self.max_l)
 
         # make sure the weight matrix matches
-        assert self.weights_rel.get_adims() == vertices_cg_rel.get_adims(), \
-        "'rel' weights has adims {} while activations have adims {}!".format(self.weights_rel.get_adims(),vertices_cg_rel.get_adims())
-        assert self.weights_rel.get_tau1() == vertices_cg_rel.tau(), \
-        "'rel' weights has tau {} while activations have tau {}!".format(self.weights_rel.tau(),vertices_cg_rel.tau())
+        # assert self.weights_rel.get_adims() == vertices_cg_rel.get_adims(), \
+        # "'rel' weights has adims {} while activations have adims {}!".format(self.weights_rel.get_adims(),vertices_cg_rel.get_adims())
+        # assert self.weights_rel.get_tau1() == vertices_cg_rel.tau(), \
+        # "'rel' weights has tau {} while activations have tau {}!".format(self.weights_rel.tau(),vertices_cg_rel.tau())
 
         # mix and sum across atoms. replace sph.getb()!!
         vertices_mixed_rel = vertices_cg_rel*self.weights_rel
@@ -219,3 +219,7 @@ class SphArr(nn.Module):
                     for j in range(self.array_dims[1]):
                         R.parts[l][b,i,j] = SO3part.spharm(l,X[b,i,j,0],X[b,i,j,1],X[b,i,j,2])
         return R
+
+
+def get_num_atom(vertices):
+    return vertices.parts[0].size(1)

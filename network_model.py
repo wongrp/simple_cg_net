@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from network_CG import *
 from network_input_mpnn import *
-
+from network_output_mlp import *
 from utils_relative_positions import *
 
 
@@ -27,36 +27,36 @@ class FullModel(nn.Module):
         self.num_species = num_species
         num_input_channels_in = self.num_species * (self.charge_power + 1)
         num_input_channels_out = num_channels[0]
-        print('number of channels in input vector is ', num_channels)
-        #num_input_channels_out = num_channels[0]
+
         # cg args
-        self.num_atoms = 29
+        self.max_l = max_l[0]
+        self.num_channels = num_channels[0]
+        self.num_cg_layers = num_cg_layers
 
         # output args
-        # self.num_scalars
-        # self.num_mixed
-        # self.activation
-        # self.device
-        # self.dtype
-
+        self.num_scalars = self.get_num_scalars()
 
         # layers
         self.input_layers = InputMPNN(max_l, num_input_channels_in, num_input_channels_out, num_mpnn_layers,
                                       soft_cut_rad, soft_cut_width, hard_cut_rad,
                                       activation = activation, device = self.device, dtype = self.dtype)
-
-        self.cg_layers = CGLayers(num_cg_layers, self.num_atoms, num_channels, max_l, hard_cut_rad)
-        # self.output_layers = OutputMLP(num_scalars, num_mixed, activation, device,dtype)
+        self.cg_layers = CGLayers(self.num_cg_layers, self.num_channels,
+                                    self.max_l, hard_cut_rad)
+        self.output_layers = OutputMLP(self.num_scalars, activation = activation,
+                                        device = self.device,dtype = self.dtype)
 
     def forward(self,data):
         # prepare input -- features, edges and corresponding masks .
         atom_scalars, atom_mask, edge_scalars, edge_mask, atom_positions = self.prepare_input(data)
-        atom_scalars = atom_scalars[:10,...]
-        atom_mask = atom_mask[:10,...]
-        edge_scalars = edge_scalars[:10,...]
-        edge_mask = edge_mask[:10,...]
-        atom_positions = atom_positions[:10,...]
-        print('just using the first 10 molecules for now.')
+
+        # for debugging...
+        # atom_scalars = atom_scalars[:8,...]
+        # atom_mask = atom_mask[:8,...]
+        # edge_scalars = edge_scalars[:8,...]
+        # edge_mask = edge_mask[:8,...]
+        # atom_positions = atom_positions[:8,...]
+        # print('just using the first 8 molecules for now.')
+
         # input message passing network
         norms = get_norm(atom_positions, atom_positions)
         atom_vec_in = self.input_layers(atom_scalars, atom_mask, edge_scalars, edge_mask, norms)
@@ -64,10 +64,11 @@ class FullModel(nn.Module):
         # cg network
         rel_pos = get_rel_pos(atom_positions,atom_positions)
         atom_scalars_cg = self.cg_layers(atom_vec_in, rel_pos, norms)
+        atom_scalars = torch.view_as_real(atom_scalars_cg)
 
         # output network
-
-        return
+        prediction = self.output_layers(atom_scalars, atom_mask)
+        return prediction
 
     def prepare_input(self, data):
         """
@@ -111,3 +112,9 @@ class FullModel(nn.Module):
         edge_scalars = torch.tensor([])
 
         return atom_scalars, atom_mask, edge_scalars, edge_mask, atom_positions
+
+    def get_num_scalars(self):
+        """
+        Calculates number of scalars per atom in each molecule.
+        """
+        return self.num_cg_layers*(self.num_channels + (self.max_l+1)*self.num_channels**2)

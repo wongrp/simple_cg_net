@@ -1,12 +1,99 @@
 import argparse
-
+from math import inf
 
 def init_args():
-    parser = argparse.ArgumentParser(description = 'data processing options')
 
+    parser = argparse.ArgumentParser(description = 'data processing options')
+    # Optimizer options
+    parser.add_argument('--num-epoch', type=int, default=255, metavar='N',
+                        help='number of epochs to train (default: 511)')
     parser.add_argument('--batch-size', '-bs', type=int, default=25, metavar='N',
                         help='Mini-batch size (default: 25)')
-    parser.add_argument('--datadir', type = str, default = 'datasets')
+    parser.add_argument('--alpha', type=float, default=0.9, metavar='N',
+                        help='Value of alpha to use for exponential moving average of training loss. (default: 0.9)')
+
+    parser.add_argument('--weight-decay', type=float, default=0, metavar='N',
+                        help='Set the weight decay used in optimizer (default: 0)')
+    parser.add_argument('--cutoff-decay', type=float, default=0, metavar='N',
+                        help='Set the weight decay used in optimizer for learnable radial cutoffs (default: 0)')
+    parser.add_argument('--lr-init', type=float, default=1e-3, metavar='N',
+                        help='Initial learning rate (default: 1e-3)')
+    parser.add_argument('--lr-final', type=float, default=1e-5, metavar='N',
+                        help='Final (held) learning rate (default: 1e-5)')
+    parser.add_argument('--lr-decay', type=int, default=inf, metavar='N',
+                        help='Timescale over which to decay the learning rate (default: inf)')
+    parser.add_argument('--lr-decay-type', type=str, default='cos', metavar='str',
+                        help='Type of learning rate decay. (cos | linear | exponential | pow | restart) (default: cos)')
+    parser.add_argument('--lr-minibatch', '--lr-mb', action=BoolArg, default=True,
+                        help='Decay learning rate every minibatch instead of epoch.')
+    parser.add_argument('--sgd-restart', type=int, default=-1, metavar='int',
+                        help='Restart SGD optimizer every (lr_decay)^p epochs, where p=sgd_restart. (-1 to disable) (default: -1)')
+
+    parser.add_argument('--optim', type=str, default='amsgrad', metavar='str',
+                        help='Set optimizer. (SGD, AMSgrad, Adam, RMSprop)')
+
+
+
+    # Dataloader and randomness options
+    parser.add_argument('--shuffle', action=BoolArg, default=True,
+                        help='Shuffle minibatches.')
+    parser.add_argument('--seed', type=int, default=1, metavar='N',
+                        help='Set random number seed. Set to -1 to set based upon clock.')
+
+    # Saving and logging options
+    parser.add_argument('--save', action=BoolArg, default=True,
+                        help='Save checkpoint after each epoch. (default: True)')
+    parser.add_argument('--load', action=BoolArg, default=False,
+                        help='Load from previous checkpoint. (default: False)')
+
+    parser.add_argument('--test', action=BoolArg, default=True,
+                        help='Perform automated network testing. (Default: True)')
+
+    parser.add_argument('--log-level', type=str, default='info',
+                        help='Logging level to output')
+
+    parser.add_argument('--textlog', action=BoolArg, default=True,
+                        help='Log a summary of each mini-batch to a text file.')
+
+    parser.add_argument('--predict', action=BoolArg, default=True,
+                        help='Save predictions. (default)')
+
+    ### Arguments for files to save things to
+    # Job prefix is used to name checkpoint/best file
+    parser.add_argument('--prefix', '--jobname', type=str, default='nosave',
+                        help='Prefix to set load, save, and logfile. (default: nosave)')
+
+    # Allow to manually specify file to load
+    parser.add_argument('--loadfile', type=str, default='',
+                        help='Set checkpoint file to load. Leave empty to auto-generate from prefix. (default: (empty))')
+    # Filename to save model checkpoint to
+    parser.add_argument('--checkfile', type=str, default='',
+                        help='Set checkpoint file to save checkpoints to. Leave empty to auto-generate from prefix. (default: (empty))')
+    # Filename to best model checkpoint to
+    parser.add_argument('--bestfile', type=str, default='',
+                        help='Set checkpoint file to best model to. Leave empty to auto-generate from prefix. (default: (empty))')
+    # Filename to save logging information to
+    parser.add_argument('--logfile', type=str, default='',
+                        help='Duplicate logging.info output to logfile. Set to empty string to generate from prefix. (default: (empty))')
+    # Filename to save predictions to
+    parser.add_argument('--predictfile', type=str, default='',
+                        help='Save predictions to file. Set to empty string to generate from prefix. (default: (empty))')
+
+    # Working directory to place all files
+    parser.add_argument('--workdir', type=str, default='./',
+                        help='Working directory as a default location for all files. (default: ./)')
+    # Directory to place logging information
+    parser.add_argument('--logdir', type=str, default='log/',
+                        help='Directory to place log and savefiles. (default: log/)')
+    # Directory to place saved models
+    parser.add_argument('--modeldir', type=str, default='model/',
+                        help='Directory to place log and savefiles. (default: model/)')
+    # Directory to place model predictions
+    parser.add_argument('--predictdir', type=str, default='predict/',
+                        help='Directory to place log and savefiles. (default: predict/)')
+    # Directory to read and save data from
+    parser.add_argument('--datadir', type=str, default='datasets/',
+                        help='Directory to look up data from. (default: data/)')
 
     # Dataset options
     parser.add_argument('--subtract-thermo', action=BoolArg, default=False,
@@ -19,12 +106,6 @@ def init_args():
                         help='Number of validation samples to use. Set to -1 to use entire dataset. (default: -1)')
     parser.add_argument('--num-test', type=int, default=-1, metavar='N',
                         help='Number of test samples to use. Set to -1 to use entire dataset. (default: -1)')
-
-    # Dataloader and randomness options
-    parser.add_argument('--shuffle', type = bool, default=True,
-                        help='Shuffle minibatches.')
-    parser.add_argument('--seed', type=int, default=1, metavar='N',
-                        help='Set random number seed. Set to -1 to set based upon clock.')
 
     # Computation options
     parser.add_argument('--num-workers', type=int, default=1,
@@ -86,6 +167,8 @@ def init_args():
 
     parser.add_argument('--gaussian-mask', action='store_true',
                         help='Use gaussian mask instead of sigmoid mask.')
+    parser.add_argument('--target', type=str, default='',
+                        help='Learning target for a dataset (such as qm9) with multiple options.')
 
 
     args = parser.parse_args()
