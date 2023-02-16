@@ -6,6 +6,7 @@ import numpy as np
 import os
 from torch.profiler import profiler
 from datetime import datetime
+import sys
 
 import logging
 logger = logging.getLogger(__name__)
@@ -230,18 +231,25 @@ class CGLayer(nn.Module):
         return reps_mp
 
 class NormalizeVecArr(nn.Module):
-    def __init__(self,max_l, num_channels):
+    def __init__(self,max_l, num_channels, catch_nan = True):
         super().__init__()
         self.max_l = max_l
         self.num_channels = num_channels
+        self.catch_nan = catch_nan
     def forward(self,reps):
         for l in range(self.max_l+1):
             
             norm_factor = torch.sum(reps.parts[l]**2)
-            print("normalization constant is {}".format(norm_factor))
-            
             reps.parts[l] /= torch.sqrt(norm_factor/self.num_channels)
-            assert torch.isnan(reps.parts[l].view(-1)).sum().item()==0
+            
+
+            if self.catch_nan == True: 
+                try: 
+                    assert torch.isnan(reps.parts[l].view(-1)).sum().item()==0
+                except AssertionError as e: 
+                    print(e)
+                    print("normalization constant is {}".format(norm_factor))
+                    sys.exit()
         return reps
 
 
@@ -253,39 +261,41 @@ class SphArr(nn.Module):
     type [n_atom, n_atom, 3]. the SO3part.spharm function in forward() must use
     x,y,z arguments instead of the X arguments.
     """
-    def __init__(self, batch ,array_dims, type, device="cpu"):
+    def __init__(self, batch ,array_dims, type, device="cpu", catch_nan = True):
         super().__init__()
         self.batch = batch
         self.array_dims = array_dims
         self.type = type
         self.device = device
+        self.catch_nan = catch_nan
     def forward(self, X):
         # self.type should be R.tau()
         # R = SO3vecArr.zeros(self.batch,self.array_dims,self.type, device = self.device)
         R = SO3vecArr()
         print("relative position dims: {}".format(X.dim()))
         print("relative position sizes: {}".format(X.size()))
-        # print("R is on {}".format(R.parts.device))
         for l in range(0,len(self.type)):
-        #     for b in range(self.batch):
-        #         for i in range(self.array_dims[0]):
-        #             for j in range(self.array_dims[1]):
-        #                 R.parts[l][b,i,j] = SO3part.spharm(l,X[b,i,j,0],X[b,i,j,1],X[b,i,j,2])
-                # R.parts[l] = SO3part.spharm(l,X[b,:,:,:])
-            # R.parts.append(SO3partArr.spharm(l,X.unsqueeze(-1), device = self.device))
             Rp = SO3partArr.spharm(l,X.unsqueeze(-1), device = self.device)
             R.parts.append(Rp)
+            
+            if self.catch_nan == True: 
+                try:
+                    indices = torch.argwhere(torch.isnan(torch.tensor(Rp)))
+                    assert torch.isnan(R.parts[l].view(-1)).sum().item()==0,\
+                        "Encountered {} NaN values at l={} at the following indices: {}.".format( 
+                        torch.isnan(R.parts[l].view(-1)).sum().item(), l, indices)
+                except AssertionError as e:
+                    print(e)
+                    i = indices[:,0:3] # first index is "all atoms", second is "the rest of the indices"
+                    print("Check if they truly are NaNs by printing the first one: {}".format(torch.tensor(Rp)[list(indices[2,:])]))
+                    print("The indices correspond to relative positions of {}".format(X[i[:,0],i[:,1],i[:,2],:]))
+                    
+                    # check if the nans come from X (they shouldn't)
+                    assert torch.isnan(X.view(-1)).sum().item()==0
 
-    
-        try:
-            indices = torch.argwhere(torch.isnan(torch.tensor(Rp)))
-            assert torch.isnan(R.parts[l].view(-1)).sum().item()==0,\
-                "Encountered {} NaN values at l={} at the following indices: {}.".format( 
-                torch.isnan(R.parts[l].view(-1)).sum().item(), l, indices)
-        except AssertionError as e:
-            print(e)
-            i = indices[:,0:3] # first index is "all atoms", second is "the rest of the indices"
-            print("Which correspond to relative positions of {}".format(X[i[:,0],i[:,1],i[:,2],:]))
+                    # reproduce
+                    sys.exit()
+                    
         return R
 
 
