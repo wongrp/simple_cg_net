@@ -5,6 +5,12 @@ from network_input_mpnn import *
 from network_output_mlp import *
 from utils_relative_positions import *
 
+from datetime import datetime
+import logging
+logger = logging.getLogger(__name__)
+torch.autograd.set_detect_anomaly(True)
+
+
 
 class FullModel(nn.Module):
     def __init__(self,max_l, max_sh, num_cg_layers, num_channels, num_species,
@@ -22,7 +28,6 @@ class FullModel(nn.Module):
         self.charge_scale = charge_scale
         self.device = device
         self.dtype = dtype
-
         # input mpnn args
         self.num_species = num_species
         num_input_channels_in = self.num_species * (self.charge_power + 1)
@@ -41,7 +46,7 @@ class FullModel(nn.Module):
                                       soft_cut_rad, soft_cut_width, hard_cut_rad,
                                       activation = activation, device = self.device, dtype = self.dtype)
         self.cg_layers = CGLayers(self.num_cg_layers, self.num_channels,
-                                    self.max_l, hard_cut_rad)
+                                    self.max_l, hard_cut_rad, device = self.device, dtype = self.dtype)
         self.output_layers = OutputMLP(self.num_scalars, activation = activation,
                                         device = self.device,dtype = self.dtype)
 
@@ -58,16 +63,29 @@ class FullModel(nn.Module):
         # print('just using the first 8 molecules for now.')
 
         # input message passing network
+        input_t = datetime.now()
         norms = get_norm(atom_positions, atom_positions)
         atom_vec_in = self.input_layers(atom_scalars, atom_mask, edge_scalars, edge_mask, norms)
+        
 
         # cg network
+        cg_t = datetime.now() 
         rel_pos = get_rel_pos(atom_positions,atom_positions)
         atom_scalars_cg = self.cg_layers(atom_vec_in, rel_pos, norms)
-        atom_scalars = torch.view_as_real(atom_scalars_cg)
-
+        atom_scalars = atom_scalars_cg
+     
         # output network
+        output_t = datetime.now()
         prediction = self.output_layers(atom_scalars, atom_mask)
+        final_t = datetime.now() 
+
+        # log time elapsed
+        input_dt = (cg_t-input_t).total_seconds()
+        cg_dt = (output_t-cg_t).total_seconds()
+        output_dt = (final_t-output_t).total_seconds()
+        logstring = "input, cg, output networks took {},{},{} seconds".format(input_dt,cg_dt, output_dt)
+        logging.info(logstring)
+
         return prediction
 
     def prepare_input(self, data):
@@ -117,4 +135,4 @@ class FullModel(nn.Module):
         """
         Calculates number of scalars per atom in each molecule.
         """
-        return self.num_cg_layers*(self.num_channels + (self.max_l+1)*self.num_channels**2)
+        return self.num_cg_layers*(2*self.num_channels + (self.max_l+1)*self.num_channels**2)

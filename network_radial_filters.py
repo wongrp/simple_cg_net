@@ -76,6 +76,7 @@ class RadPolyTrig(nn.Module):
         super(RadPolyTrig, self).__init__()
 
         trig_basis, rpow = basis_set
+        print("trig_basis: {}".format(trig_basis))
         self.rpow = rpow
         self.max_sh = max_sh
 
@@ -120,14 +121,15 @@ class RadPolyTrig(nn.Module):
         norms = norms.unsqueeze(-1)
 
         # Get inverse powers
+        print("self.scales: {}".format(self.scales))
         rad_powers = torch.stack([torch.where(edge_mask, norms.pow(-pow), self.zero) for pow in range(self.rpow+1)], dim=-1)
-
+        
         # Calculate trig functions
         rad_trig = torch.where(edge_mask, torch.sin((2*pi*self.scales)*norms+self.phases), self.zero).unsqueeze(-1)
-
+        
         # Take the product of the radial powers and the trig components and reshape
         rad_prod = (rad_powers*rad_trig).view(s + (1, 2*self.num_rad,))
-
+        
         # Apply linear mixing function, if desired
         if self.mix == 'cplx':
             radial_functions = [linear(rad_prod).view(s + (self.num_channels, 2)) for linear in self.linear]
@@ -139,4 +141,5 @@ class RadPolyTrig(nn.Module):
         else:
             radial_functions = [rad_prod.view(s + (self.num_rad, 2))] * (self.max_sh + 1)
             # shape = (13000, 29, 29, 16, 2)
+        
         return radial_functions # shape = (B, C, 2)

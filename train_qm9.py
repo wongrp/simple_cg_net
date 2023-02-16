@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
+from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
 import logging
 from datetime import datetime
@@ -21,6 +22,7 @@ from engine import Engine
 
 from collate import collate_fn
 
+# print(torch.cuda.memory_summary())
 
 
 # This makes printing tensors more readable.
@@ -34,6 +36,7 @@ def main():
     # Initialize arguments and cuda
     args = init_args()
     device, dtype = init_cuda(args)
+
 
     # Initialize dataloader.
     # datasets is a ProcessedDataset object.
@@ -58,6 +61,7 @@ def main():
 
 
     # # Initialize model
+    
     model = FullModel(args.max_l, args.max_sh, args.num_cg_layers, args.num_channels, num_species,
                  args.cutoff_type, args.hard_cut_rad, args.soft_cut_rad, args.soft_cut_width,
                  args.weight_init, args.level_gain, args.charge_power, args.basis_set,
@@ -74,6 +78,8 @@ def main():
     # Define a loss function. Just use L2 loss for now.
     loss_fn = torch.nn.functional.mse_loss
 
+    if device == torch.device('cuda'):
+        model.cuda()
     # Apply the covariance and permutation invariance tests.
     # cormorant_tests(model, dataloaders['train'], args, charge_scale=charge_scale)
 
@@ -83,6 +89,8 @@ def main():
     # Load from checkpoint file. If no checkpoint file exists, automatically does nothing.
     trainer.load_checkpoint()
 
+
+
     # Train model.
     trainer.train()
 
@@ -91,3 +99,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

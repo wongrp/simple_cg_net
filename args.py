@@ -113,8 +113,8 @@ def init_args():
     parser.add_argument('--cuda', dest='cuda', action='store_true',
                         help='Use CUDA')
     parser.add_argument('--no-cuda', '--cpu', dest='cuda', action='store_false',
-                        help='Use CPU (default)')
-    parser.set_defaults(cuda=False)
+                        help='Use CUDA (default)')
+    parser.set_defaults(cuda=True)
     parser.add_argument('--float', dest='dtype', action='store_const', const='float',
                         help='Use floats.')
     parser.add_argument('--double', dest='dtype', action='store_const', const='double',

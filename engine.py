@@ -2,6 +2,8 @@ import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import torch.optim.lr_scheduler as sched
+# from torch.autograd.profiler import profile
+from torch.profiler import profile, record_function, ProfilerActivity, schedule
 
 import argparse, os, sys, pickle
 from datetime import datetime
@@ -181,6 +183,7 @@ class Engine:
 
     def train(self):
         epoch0 = self.epoch
+    
         for epoch in range(epoch0, self.args.num_epoch):
             self.epoch = epoch
             epoch_time = datetime.now()
@@ -198,7 +201,9 @@ class Engine:
             self._save_checkpoint(valid_mae)
 
             logging.info('Epoch {} complete!'.format(epoch+1))
-
+                    # print(prof.key_averages(group_by_stack_n=5).table(sort_by='self_cpu_time_total', row_limit=5))
+            
+               
     def _get_target(self, data, stats=None):
         """
         Get the learning target.
@@ -222,7 +227,20 @@ class Engine:
 
         self.model.train()
         epoch_t = datetime.now()
+            # Profile the memory consumption and run time of operators
+            #activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+        
         for batch_idx, data in enumerate(dataloader):
+            # with profile(activities=[
+            #     ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            #     schedule=torch.profiler.schedule(
+            #     wait=0, # during this phase profiler is not active
+            #     warmup=2, # during this phase profiler starts tracing, but the results are discarded
+            #     active=6, # during this phase profiler traces and records data
+            #     repeat=2), # specifies an upper bound on the number of cycles
+            #     with_stack=True, # enable stack tracing, adds extra profiling overhead
+            #     record_shapes=True, profile_memory = True) as profiler:
+
             batch_t = datetime.now()
 
             # Standard zero-gradient
@@ -231,13 +249,13 @@ class Engine:
             # Get targets and predictions
             targets = self._get_target(data, self.stats)
             predict = self.model(data)
-            print(targets)
-            print(predict)
+            print("Targets: {}".format(targets))
+            print("Predict: {}".format(predict))
 
             # Calculate loss and backprop
             loss = self.loss_fn(predict, targets)
             loss.backward()
-
+            
             # Step optimizer and learning rate
             self.optimizer.step()
             self._step_lr_batch()
@@ -250,6 +268,9 @@ class Engine:
             self._log_minibatch(batch_idx, loss, targets, predict, batch_t, epoch_t)
 
             self.minibatch += 1
+                # update
+                # profiler.step()
+            # print(profiler.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))
 
         all_predict = torch.cat(all_predict)
         all_targets = torch.cat(all_targets)

@@ -1,4 +1,4 @@
-import torch
+
 import numpy as np
 
 import torch
@@ -8,6 +8,7 @@ from gelib import *
 from network_output_mlp import *
 from network_edge_update import *
 from network_radial_filters import *
+
 
 
 # from cormorant.nn.generic_levels import BasicMLP
@@ -183,17 +184,19 @@ class InputMPNN(nn.Module):
         """
         # Unsqueeze the atom mask to match the appropriate dimensions later
         atom_mask = atom_mask.unsqueeze(-1)
-
+    
         # Get the shape of the input to reshape at the end
         s = features.shape
-
+        
         # Loop over MPNN levels. There is no "edge network" here.
         # Instead, there is just masked radial functions, that take
         # the role of the adjacency matrix.
+        layer = 1 
         for mlp, rad_filt, mask in zip(self.mlps, self.rad_filts, self.masks):
+            print("layer {}".format(layer))
+            layer += 1 
             # Construct the learnable radial functions
             rad = rad_filt(norms, edge_mask)
-
             # TODO: Real-valued SO3Scalar so we don't need any hacks
             # Convert to a form that MaskLevel expects
             # Hack to account for the lack of real-valued SO3Scalar and
@@ -212,22 +215,21 @@ class InputMPNN(nn.Module):
             # Concatenate the passed messages with the original features
             # last argumet is dim.
             features_mp = torch.cat([features_mp, features], -1)
-
+            
             # Now apply a masked MLP
             features = mlp(features_mp, mask=atom_mask)
-
+            
         # The output are the MLP features reshaped into a set of complex numbers.
         features = features.view(s[0:2] + (1, 1, 2,self.channels_out))
 
         # construct complex tensor for GELib
         features = torch.complex(features[...,0,:],features[...,1,:])
-
+    
         # Convert to SO3VecArr object.
         features_size = self.channels_out*np.ones((self.max_l[0]+1)).astype(int)
-        out = SO3vecArr.zeros(features.size(0),[features.size(1),1],features_size)
+        out = SO3vecArr.zeros(features.size(0),[features.size(1),1],features_size, device = self.device)
         out.parts[0] = features
         
-
         return out
 
     @property
