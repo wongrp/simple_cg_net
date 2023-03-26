@@ -9,6 +9,8 @@ import argparse, os, sys, pickle
 from datetime import datetime
 from math import sqrt, inf, log, log2, exp, ceil
 
+import numpy as np
+
 MAE = torch.nn.L1Loss()
 MSE = torch.nn.MSELoss()
 RMSE = lambda x, y : sqrt(MSE(x, y))
@@ -44,6 +46,11 @@ class Engine:
 
         self.device = device
         self.dtype = dtype
+
+
+        # for plotting losses
+        self.train_mae_arr = np.zeros((self.args.num_epoch))
+        self.val_mae_arr = np.zeros((self.args.num_epoch))
 
     def _save_checkpoint(self, valid_mae):
         if not self.args.save: return
@@ -90,11 +97,11 @@ class Engine:
 
         logging.info('Best loss from checkpoint: {} at epoch {}'.format(self.best_loss, self.epoch))
 
-    def evaluate(self, splits=['train', 'valid', 'test'], best=True, final=True):
+    def evaluate(self, splits=['train', 'val', 'test'], best=True, final=True):
         """
         Evaluate model on training/validation/testing splits.
 
-        :splits: List of splits to include. Only valid splits are: 'train', 'valid', 'test'
+        :splits: List of splits to include. Only valid splits are: 'train', 'val', 'test'
         :best: Evaluate best model as determined by minimum validation error over evolution
         :final: Evaluate final model at end of training phase
         """
@@ -192,18 +199,29 @@ class Engine:
             self._warm_restart(epoch)
             self._step_lr_epoch()
 
+            print("train :)")
             train_predict, train_targets = self.train_epoch()
-            valid_predict, valid_targets = self.predict('valid')
+            print("val :)")
+            valid_predict, valid_targets = self.predict('val')
 
+            print("log predict train")
             train_mae, train_rmse = self.log_predict(train_predict, train_targets, 'train', epoch=epoch)
-            valid_mae, valid_rmse = self.log_predict(valid_predict, valid_targets, 'valid', epoch=epoch)
+            print("log predict val")
+            valid_mae, valid_rmse = self.log_predict(valid_predict, valid_targets, 'val', epoch=epoch)
 
             self._save_checkpoint(valid_mae)
 
             logging.info('Epoch {} complete!'.format(epoch+1))
                     # print(prof.key_averages(group_by_stack_n=5).table(sort_by='self_cpu_time_total', row_limit=5))
             
-               
+            print("train_mae: {}".format(train_mae))
+            
+            # save 
+            self.train_mae_arr[epoch] = train_mae
+            self.val_mae_arr[epoch] = valid_mae
+
+
+
     def _get_target(self, data, stats=None):
         """
         Get the learning target.
@@ -277,7 +295,7 @@ class Engine:
 
         return all_predict, all_targets
 
-    def predict(self, set='valid'):
+    def predict(self, set='val'):
         dataloader = self.dataloaders[set]
 
         self.model.eval()
@@ -313,7 +331,7 @@ class Engine:
         mae_units = sigma*mae
         rmse_units = sigma*rmse
 
-        datastrings = {'train': 'Training', 'test': 'Testing', 'valid': 'Validation'}
+        datastrings = {'train': 'Training', 'test': 'Testing', 'val': 'Validation'}
 
         if epoch >= 0:
             suffix = 'final'

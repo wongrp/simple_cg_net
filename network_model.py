@@ -54,23 +54,15 @@ class FullModel(nn.Module):
         # prepare input -- features, edges and corresponding masks .
         atom_scalars, atom_mask, edge_scalars, edge_mask, atom_positions = self.prepare_input(data)
 
-        # for debugging...
-        # atom_scalars = atom_scalars[:8,...]
-        # atom_mask = atom_mask[:8,...]
-        # edge_scalars = edge_scalars[:8,...]
-        # edge_mask = edge_mask[:8,...]
-        # atom_positions = atom_positions[:8,...]
-        # print('just using the first 8 molecules for now.')
-
         # input message passing network
         input_t = datetime.now()
         norms = get_norm(atom_positions, atom_positions)
         atom_vec_in = self.input_layers(atom_scalars, atom_mask, edge_scalars, edge_mask, norms)
-        
 
         # cg network
         cg_t = datetime.now() 
         rel_pos = get_rel_pos(atom_positions,atom_positions)
+        rel_pos = rel_pos.to('cpu') # remove this when Risi enables sph to be calculated on GPU 
         atom_scalars_cg = self.cg_layers(atom_vec_in, rel_pos, norms)
         atom_scalars = atom_scalars_cg
      
@@ -135,4 +127,4 @@ class FullModel(nn.Module):
         """
         Calculates number of scalars per atom in each molecule.
         """
-        return self.num_cg_layers*(2*self.num_channels + (self.max_l+1)*self.num_channels**2)
+        return self.num_cg_layers*(2*self.num_channels + (self.max_l+1)*self.num_channels)

@@ -4,6 +4,8 @@ logger = logging.getLogger(__name__)
 import torch.optim as optim
 import torch.optim.lr_scheduler as sched
 from math import inf, log, log2, exp, ceil
+import os
+import sys
 
 def init_cuda(args):
     if args.cuda:
@@ -80,3 +82,79 @@ def init_scheduler(args, optimizer):
         raise ValueError('Incorrect choice for lr_decay_type!')
 
     return scheduler, restart_epochs
+
+
+# file paths
+def init_file_paths(args):
+
+    # Initialize files and directories to load/save logs, models, and predictions
+    workdir = args.workdir
+    prefix = args.prefix
+    modeldir = args.modeldir
+    logdir = args.logdir
+    predictdir = args.predictdir
+
+    if prefix and not args.logfile:  args.logfile =  os.path.join(workdir, logdir, prefix+'.log')
+    if prefix and not args.bestfile: args.bestfile = os.path.join(workdir, modeldir, prefix+'_best.pt')
+    if prefix and not args.checkfile: args.checkfile = os.path.join(workdir, modeldir, prefix+'.pt')
+    if prefix and not args.loadfile: args.loadfile = args.checkfile
+    if prefix and not args.predictfile: args.predictfile = os.path.join(workdir, predictdir, prefix)
+
+    if not os.path.exists(modeldir):
+        logger.warning('Model directory {} does not exist. Creating!'.format(modeldir))
+        os.mkdir(modeldir)
+    if not os.path.exists(logdir):
+        logger.warning('Logging directory {} does not exist. Creating!'.format(logdir))
+        os.mkdir(logdir)
+    if not os.path.exists(predictdir):
+        logger.warning('Prediction directory {} does not exist. Creating!'.format(predictdir))
+        os.mkdir(predictdir)
+
+    args.dataset = 'qm9' #hardcoding this for now
+    args.dataset = args.dataset.lower()
+
+    if args.dataset.startswith('qm9'):
+        if not args.target:
+            args.target = 'U0'
+    elif args.dataset.startswith('md17'):
+        if not args.subset:
+            args.subset = 'uracil'
+        if not args.target:
+            args.target = 'energies'
+    else:
+        raise ValueError('Dataset must be qm9 or md17!')
+
+    logger.info('Initializing simulation based upon argument string:')
+    logger.info(' '.join([arg for arg in sys.argv]))
+    logger.info('Log, best, checkpoint, load files: {} {} {} {}'.format(args.logfile, args.bestfile, args.checkfile, args.loadfile))
+    logger.info('Dataset, learning target, datadir: {} {} {}'.format(args.dataset, args.target, args.datadir))
+    # _git_version()
+
+    if args.seed < 0:
+        seed = int((datetime.now().timestamp())*100000)
+        logger.info('Setting seed based upon time: {}'.format(seed))
+        args.seed = seed
+        torch.manual_seed(seed)
+
+    return args
+
+
+
+def init_logger(args):
+    if args.logfile:
+        handlers = [logging.FileHandler(args.logfile, mode='w'), logging.StreamHandler()]
+    else:
+        handlers = [logging.StreamHandler()]
+
+    if args.log_level.lower() == 'debug':
+        loglevel = logging.DEBUG
+    elif args.log_level.lower() == 'info':
+        loglevel = logging.INFO
+    else:
+        ValueError('Inappropriate choice of logging_level. {}'.format(args.logging_level))
+
+    logging.basicConfig(level=loglevel,
+                        format="%(message)s",
+                        handlers=handlers
+                        )
+

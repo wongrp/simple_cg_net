@@ -121,7 +121,6 @@ class RadPolyTrig(nn.Module):
         norms = norms.unsqueeze(-1)
 
         # Get inverse powers
-        print("self.scales: {}".format(self.scales))
         rad_powers = torch.stack([torch.where(edge_mask, norms.pow(-pow), self.zero) for pow in range(self.rpow+1)], dim=-1)
         
         # Calculate trig functions

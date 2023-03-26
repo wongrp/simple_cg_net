@@ -50,8 +50,8 @@ def initialize_datasets(args, directory, dataset, subset=None,
     """
     # Set the number of points based upon the arguments
     num_pts = {'train': args.num_train,
-               'test': args.num_test, 'valid': args.num_valid}
-
+               'test': args.num_test, 'val': args.num_valid}
+    print("num_pts", num_pts)
     # Download and process dataset. Returns datafiles.
     datafiles = prepare_dataset(
         directory, dataset, subset, force_download=force_download)
@@ -71,10 +71,15 @@ def initialize_datasets(args, directory, dataset, subset=None,
     # Get a list of all species across the entire dataset
     all_species = _get_species(datasets, ignore_check=False)
 
+    for split,data in datasets.items():
+        print(num_pts.get(split,-1))
+        print(split)
+        print(num_pts.get(split))
     # Now initialize MolecularDataset based upon loaded data
     datasets = {split: ProcessedDataset(data, num_pts=num_pts.get(
         split, -1), included_species=all_species, subtract_thermo=subtract_thermo) for split, data in datasets.items()}
 
+    
     # Check that all datasets have the same included species:
     assert(len(set(tuple(data.included_species.tolist()) for data in datasets.values())) ==
            1), 'All datasets must have same included_species! {}'.format({key: data.included_species for key, data in datasets.items()})
@@ -85,9 +90,11 @@ def initialize_datasets(args, directory, dataset, subset=None,
 
     # Now, update the number of training/test/validation sets in args
     args.num_train = datasets['train'].num_pts
+    print("num_train = ", args.num_train)
     args.num_valid = datasets['val'].num_pts
+    print("num_valid = ", args.num_valid)
     args.num_test = datasets['test'].num_pts
-
+    print("num_test = ", args.num_test)
     return args, datasets, num_species, max_charge
 
 def _get_species(datasets, ignore_check=False):

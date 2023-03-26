@@ -24,11 +24,9 @@ class CGLayers(nn.Module):
 
         # track types after CG products, concatenation and mixing
         self.type = num_channels*np.ones((max_l+1)).astype(int)
-        self.type_after_nl = np.array(DiagCGproductType(self.type,self.type, maxl = max_l)).astype(int)
-        self.type_sph = num_channels*np.ones((max_l+1)).astype(int) # type resets after each mix # this is tunable to some degree.
-        self.type_after_rel = np.array(DiagCGproductType(self.type,self.type_sph, maxl = max_l)).astype(int)
-
-        
+        self.type_after_nl = np.array(CGproductType(self.type,self.type, maxl = max_l)).astype(int)
+        self.type_sph = 1*np.ones((max_l+1)).astype(int) # type resets after each mix # this is tunable to some degree.
+        self.type_after_rel = np.array(CGproductType(self.type,self.type_sph, maxl = max_l)).astype(int)
 
         # make layer module list
         cg_layers = nn.ModuleList() # list-iterable , but registered as modules.
@@ -90,7 +88,7 @@ class CGLayers(nn.Module):
         setup_dt = (setup_tf-setup_ti).total_seconds()
         sph_dt = (sph_tf-sph_ti).total_seconds() 
         
-        logstring1 = "\n In CG network, set up took {}s, cg layers took {}s and scalars took {}s \n ".format(setup_dt,cglayer_dt,scalars_dt)
+        logstring1 = "\n In cg network, set up took {}s, cg layers took {}s and scalars took {}s \n ".format(setup_dt,cglayer_dt,scalars_dt)
         logstring2 = "The spherical harmonics were constructed in {}s \n ".format(sph_dt)
         logging.info(logstring1)
         logging.info(logstring2)
@@ -100,14 +98,10 @@ class CGLayers(nn.Module):
     def _init_weights(self, module):
         if isinstance(module, CGLayer):
             # nonlinear weights mixes activations after a CG nonlinearity.
-            module.weights_mp = SO3weights.randn(self.type, self.type, device = self.device)
             module.weights_nl = SO3weights.randn(self.type_after_nl, self.type, device = self.device)
             # print(module.weights_nl.parts[0].get_device())
             # rel weights mixes activations after spherical harmonics CG product.
             module.weights_rel = SO3weights.randn(self.type_after_rel,self.type, device = self.device)
-            
-    
-
 
 class GetScalars(nn.Module):
     def __init__(self,num_channels, max_l, device = torch.device('cpu'), dtype = None):
@@ -173,7 +167,7 @@ class CGLayer(nn.Module):
         # self.copy_array = CopyArray()
 
     def forward(self, vertices, connectivity, sph):
-        vertices_mp = vertices*self.weights_mp+self.message_pass(vertices,connectivity)
+        vertices_mp = self.message_pass(vertices,connectivity)
         
 
         # quick fix, delete when gather is fixed on the cnine side.#
@@ -183,33 +177,64 @@ class CGLayer(nn.Module):
 
         # quick fix, delete when gather is fixed on the cnine side.#
         ti = datetime.now()
+        vertices_cg_nl = CGproduct(vertices_mp, vertices_mp, maxl = self.max_l)
 
-        vertices_cg_nl = DiagCGproduct(vertices_mp, vertices_mp, maxl = self.max_l)
-        tf = datetime.now()
         vertices_mixed_nl = vertices_cg_nl*self.weights_nl
-        
-        # print("nl CG product took {}".format((tf-ti).total_seconds()))
+        tf = datetime.now()
+        print((tf-ti).total_seconds())
 
+        # spherical harmonics are NxN, activations are Nx1. Repeat activations by N to take CG product.
+        # make a repeated copy of the mixed nonlinear vertices.
+        new_adims = sph.get_adims()
+        old_adims = vertices_mixed_nl.get_adims()
+        repeat_dims = (np.array(new_adims)/np.array(old_adims)).astype(int)
+
+        current_tau = np.array(vertices_mixed_nl.tau()).astype(int)
+
+        vertices_mixed_nl_repeat = SO3vecArr.zeros(sph.getb(),new_adims, current_tau)
+     
+        for l in range(self.max_l+1):
+            vertices_mixed_nl_repeat.parts[l] = vertices_mixed_nl.parts[l].repeat(1, repeat_dims[0],repeat_dims[1],1,1) # batch, adim 1, adim 2, 2l+1, num_channels
+
+   
+        # print("vertices: {}".format(vertices_mixed_nl_repeat.parts[0].device))
+        # print("sph: {}".format(sph.parts[0].device))
+    
+        vertices_mixed_nl_repeat.to(self.device)
         sph.to(self.device)
       
+        # print("sph b:{}".format(sph.getb()))
+        # print("vertices b:{}".format(vertices_mixed_nl_repeat.getb()))
+        # print("sph a:{}".format(sph.get_adims()))
+        # print("vertices a:{}".format(vertices_mixed_nl_repeat.get_adims()))
+        # print("vertices type: {}".format(vertices_mixed_nl_repeat.tau()))
+        # print("sph type: {}".format(sph.tau()))
         ti = datetime.now()
-        sphx = SO3vecArr.zeros(sph.getb(),sph.get_adims(), sph.tau())
-
-        for l in range(self.max_l+1):
-            sphx.parts[l] = torch.einsum('bijmc->bimc',sph.parts[l])
-
-        vertices_cg_rel = CGproduct(vertices_mixed_nl,sphx, maxl = self.max_l)
+        vertices_cg_rel = CGproduct(vertices_mixed_nl_repeat ,sph, maxl = self.max_l)
         tf = datetime.now()
-        # print((tf-ti).total_seconds())
+        print((tf-ti).total_seconds())
+        # make sure the weight matrix matches
+        # assert self.weights_rel.get_adims() == vertices_cg_rel.get_adims(), \
+        # "'rel' weights has adims {} while activations have adims {}!".format(self.weights_rel.get_adims(),vertices_cg_rel.get_adims())
+        # assert self.weights_rel.get_tau1() == vertices_cg_rel.tau(), \
+        # "'rel' weights has tau {} while activations have tau {}!".format(self.weights_rel.tau(),vertices_cg_rel.tau())
 
         # mix and sum across atoms. replace sph.getb()!!
         vertices_mixed_rel = vertices_cg_rel*self.weights_rel
+        vertices_sum = SO3vecArr.zeros(sph.getb(),old_adims,vertices.tau())
+
+        for l in range(self.max_l+1):
+            # array dims won't match without keepdim
+            vertices_sum.parts[l] = torch.sum(vertices_mixed_rel.parts[l], 2, keepdim = True)
 
         # equivariant norm
-        vertices_normed = self.normalize(vertices_mixed_rel)
+        vertices_normed = self.normalize(vertices_sum)
 
-   
-        return vertices_normed
+        # check that array dimensions match original.
+        assert vertices_sum.get_adims() == vertices.get_adims(), \
+        "summed activations has adims {} while input activations have adims {}!".format(vertices_sum.get_adims(), vertices.get_adims())
+
+        return vertices_sum
 
     def message_pass(self, reps, connectivity):
         mask = cnine.Rmask1(connectivity)
@@ -217,28 +242,17 @@ class CGLayer(nn.Module):
         return reps_mp
 
 class NormalizeVecArr(nn.Module):
-    def __init__(self,max_l, num_channels, catch_nan = True, norm_option = "norm"):
+    def __init__(self,max_l, num_channels, catch_nan = True):
         super().__init__()
         self.max_l = max_l
         self.num_channels = num_channels
         self.catch_nan = catch_nan
-        self.norm_option = norm_option
     def forward(self,reps):
         for l in range(self.max_l+1):
             
             norm_factor = torch.sum(torch.pow(reps.parts[l],2))
-            norm_factor = (2*l+1)*torch.linalg.norm(reps.parts[l])
-
-            assert self.norm_option == "norm" or self.norm_option == "component", "must indicate norm_option as component or norm!"
-            # norm normalization 
-            if self.norm_option == "norm": 
-                reps.parts[l] = reps.parts[l]/(norm_factor/self.num_channels)
+            reps.parts[l] = reps.parts[l]/torch.sqrt(norm_factor/self.num_channels)
             
-            # component normalization ; <x_i^2> = 1 
-            elif self.norm_option == "component":
-                reps.parts[l] = reps.parts[l]/(norm_factor/self.num_channels) 
-
-                
 
             if self.catch_nan == True: 
                 try: 
