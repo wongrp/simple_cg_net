@@ -36,7 +36,7 @@ torch.set_printoptions(linewidth=1000, threshold=100000)
 
 # logging.basicConfig(level = logging.INFO, format = "%(message)s")
 logger = logging.getLogger('')
-wandb_logger = WandbLogger(project="simple_cg_net")
+
 
 
 def main():
@@ -46,10 +46,12 @@ def main():
     init_logger(args)
     device, dtype = init_cuda(args)
     
+    # logger
+    wandb_logger = WandbLogger(project="simple_cg_net", name = args.prefix) 
 
     # Instantiate datamodule class
     datamodule = DataModule(args, collate_fn)
-    args, datasets, num_species, charge_scale, stats = dm.setup()
+    args, datasets, num_species, charge_scale, stats = datamodule.setup()
     
     # Instantiate the pytorch lightning model and datamodule class 
     model = Engine(args, num_species, charge_scale, stats, device, dtype)
