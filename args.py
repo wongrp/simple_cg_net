@@ -4,6 +4,9 @@ from math import inf
 def init_args():
 
     parser = argparse.ArgumentParser(description = 'data processing options')
+    # Tune options 
+    parser.add_argument('--tune', action=BoolArg, default=True, metavar ='N', 
+                        help = 'True to run Ray Tune, False to manually specify hyperparameters for a single run.')
     # Optimizer options
     parser.add_argument('--num-epoch', type=int, default=255, metavar='N',
                         help='number of epochs to train (default: 511)')

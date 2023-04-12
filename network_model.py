@@ -23,6 +23,12 @@ class FullModel(nn.Module):
 
 
         # args #
+        # if channel number is a constant
+        print(type(num_channels))
+        if type(num_channels) == list: 
+            if len(num_channels) == 1: 
+                num_channels = num_channels[0]
+        
         # input args
         self.charge_power = charge_power
         self.charge_scale = charge_scale
@@ -31,11 +37,11 @@ class FullModel(nn.Module):
         # input mpnn args
         self.num_species = num_species
         num_input_channels_in = self.num_species * (self.charge_power + 1)
-        num_input_channels_out = num_channels[0]
+        num_input_channels_out = num_channels
 
         # cg args
         self.max_l = max_l[0]
-        self.num_channels = num_channels[0]
+        self.num_channels = num_channels
         self.num_cg_layers = num_cg_layers
 
         # output args

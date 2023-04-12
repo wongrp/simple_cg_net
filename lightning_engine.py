@@ -7,9 +7,6 @@ from network_model import FullModel
 from utils_init import *
 
 
-
-
-
 class Engine(pl.LightningModule):
     """
     Engine class. Contains hyperparameters and training information. 
@@ -63,7 +60,17 @@ class Engine(pl.LightningModule):
         targets = self._get_target(batch, self.stats)
         predict = self.forward(batch)
         loss = self.loss_fn(predict, targets)
-        self.log("val/loss", loss, logger = True)
+        self.log("val_loss", loss, logger = True)
+        return loss
+    
+    def test_step(self, batch, batch_idx):
+        """
+        Tests one batch. 
+        """
+        targets = self._get_target(batch, self.stats)
+        predict = self.forward(batch)
+        loss = self.loss_fn(predict, targets)
+        self.log("test_loss", loss, logger = True)
         return loss
 
     def configure_optimizers(self):

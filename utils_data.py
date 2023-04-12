@@ -128,13 +128,14 @@ def download_and_process_qm9(directory):
         data_dict[split] = xyz_files_to_dict(qm9_filename_data ,xyz_to_dict,file_idx_list = split_idx, stack = True)
 
     # Subtract thermochemical energy if desired.
-    if calculate_thermo:
-        # Download thermochemical energy from GDB9 dataset, and then process it into a dictionary
-        therm_energy = get_thermo_dict(directory, cleanup)
+    # I need to add this back in - ryan
+    # if calculate_thermo:
+    #     # Download thermochemical energy from GDB9 dataset, and then process it into a dictionary
+    #     therm_energy = get_thermo_dict(directory, cleanup)
 
-        # For each of train/validation/test split, add the thermochemical energy
-        for split_idx, split_data in data_dict.items():
-            data_dict[split_idx] = add_thermo_targets(split_data, therm_energy)
+    #     # For each of train/validation/test split, add the thermochemical energy
+    #     for split_idx, split_data in data_dict.items():
+    #         data_dict[split_idx] = add_thermo_targets(split_data, therm_energy)
 
     # take the dictionary and save split data in npz format.
     logging.info('Saving processed data:')

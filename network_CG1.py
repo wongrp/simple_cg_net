@@ -8,11 +8,6 @@ import os
 from torch.profiler import profiler
 from datetime import datetime
 import sys
-import einops
-
-"""
-Copied before moving angular part to before radial part.
-"""
 
 import logging
 logger = logging.getLogger(__name__)
@@ -21,7 +16,7 @@ logger = logging.getLogger(__name__)
 class CGLayers(nn.Module):
     def __init__(self, num_CG_layers, num_channels, max_l, hard_cut_rad, device = None, dtype = torch.float32):
         super().__init__()
-
+        print("Initializing CG layers")
         # parameters and args
         self.device = device
         self.dtype = dtype
@@ -61,11 +56,11 @@ class CGLayers(nn.Module):
         make_sph = SphArr(vertices.getb(),[self.num_atoms,self.num_atoms], self.type_sph, device = self.device)
         
         sph_ti = datetime.now() #time initial
-        # print(rel_pos.device)
+        print(rel_pos.device)
         sph = make_sph(rel_pos)
         sph_tf = datetime.now() #time final
 
-        connectivity = (norms < self.hard_cut_rad).cfloat()
+        connectivity = (norms < self.hard_cut_rad).float()
 
         setup_tf = datetime.now()
 
@@ -73,7 +68,9 @@ class CGLayers(nn.Module):
         cglayer_dt = 0 
         scalars_dt = 0 
     
+        print("CG Layers")
         for idx, cg_layer in enumerate(self.cg_layers):
+            print(torch.cuda.memory_summary())
             cglayer_ti = datetime.now()
           
             vertices = cg_layer(vertices, connectivity, sph)
@@ -178,45 +175,53 @@ class CGLayer(nn.Module):
         # self.copy_array = CopyArray()
 
     def forward(self, vertices, connectivity, sph):
-        # vector dimensions
-        self.b = vertices.getb()
-        self.adim = vertices.get_adims()[0]
-        self.tau = vertices.tau() 
-
-        sph.to(self.device)
+        vertices_cg_rel = CGproduct(vertices,sphx, maxl = self.max_l)
+        vertices_mp = self.message_pass(vertices_cg_rel,connectivity)
         
-        ti = datetime.now()
-        vertices_repeated = SO3vecArr.zeros(self.b,[self.adim,self.adim],self.tau, device = self.device)
-        for l in range(self.max_l):
-            lth_part_repeated = vertices.parts[l].repeat(1,1,vertices.get_adims()[0],1,1)
-            vertices_repeated.parts[l] = lth_part_repeated
-        tf = datetime.now() 
-        print("repeat operation took {}s".format((tf-ti).total_seconds()))
-        vertices_rel = CGproduct(vertices_repeated,sph, maxl = self.max_l)*self.weights_rel
-    
-        vertices_mp = self.message_pass(vertices_rel,connectivity)
 
-        vertices_nl = DiagCGproduct(vertices_mp, vertices_mp, maxl = self.max_l)*self.weights_nl
+        # quick fix, delete when gather is fixed on the cnine side.#
+        # for l in range(len(vertices_mp.tau())):
+        #     vertices_mp.parts[l] = torch.unsqueeze(vertices_mp.parts[l],0)
+        # assert vertices_mp.getb() == 1
+
+        # quick fix, delete when gather is fixed on the cnine side.#
+        ti = datetime.now()
+        print("adding diag")
+        vertices_cg_nl = DiagCGproduct(vertices_mp, vertices_mp, maxl = self.max_l)
+        print("diag added")
+        tf = datetime.now()
+        vertices_mixed_nl = vertices_cg_nl*self.weights_nl
+         
+        sph.to(self.device)
+        sphx = SO3vecArr.zeros(sph.getb(),sph.get_adims(), sph.tau())
+        for l in range(self.max_l+1):
+            sphx.parts[l] = torch.einsum('bijmc->bimc',sph.parts[l])
+
+        # print("nl CG product took {}".format((tf-ti).total_seconds()))
+
+        
+      
+        ti = datetime.now()
+        
+
+        
+        tf = datetime.now()
+        # print((tf-ti).total_seconds())
+
+        # mix and sum across atoms. replace sph.getb()!!
+        # vertices_mixed_rel = vertices_cg_rel*self.weights_rel
 
         # equivariant norm
-        vertices_normed = self.normalize(vertices_nl)
+        vertices_normed = self.normalize(vertices_mp)
+
    
         return vertices_normed
 
-    # def message_pass(self, reps, connectivity):
-    #     mask = cnine.Rmask1(connectivity)
-    #     print(connectivity.size())
-    #     print(mask)
-    #     reps_mp= reps.gather(mask)
-    #     return reps_mp
+    def message_pass(self, reps, connectivity):
+        mask = cnine.Rmask1(connectivity)
+        reps_mp= reps.gather(mask)
+        return reps_mp
 
-    def message_pass(self, reps, connectivity): 
-        reps_mp = SO3vecArr.zeros(self.b, [self.adim,1],self.tau,device = self.device)
-        for l in range(self.max_l): 
-            print(reps.parts[l].size())
-            reps_mp.parts[l][:,:,0] = torch.einsum('bijmc,bij->bimc', reps.parts[l],connectivity)
-        return reps_mp 
-            
 class NormalizeVecArr(nn.Module):
     def __init__(self,max_l, num_channels, catch_nan = True, norm_option = "norm"):
         super().__init__()
